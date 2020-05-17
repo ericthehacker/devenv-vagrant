@@ -8,37 +8,50 @@
     - ./devenv_vars.config.yml
 
   vars:
-    block_storage_mount_root: /var/www
+    # TODO: figure out dynamic mount points
+    block_storage_mount_root: /data
     root_my_cnf_path: ~root/.my.cnf
+    block_storage_device: /dev/sda
+    block_storage_format: xfs
 
   tasks:
 
-    - debug:
-        verbosity: 1
-        msg: "The following storage block volume ID was provided: {{ block_id }}"
+    - name: Check for block storage device
+      stat:
+        path: "{{ block_storage_device }}"
+      register: block_storage_device_stat
 
     - name: "Mount attached block storage (if applicable)"
       block:
 
-      - name: Check for attached block storage
-        stat:
-          path: "/dev/disk/by-uuid/{{ block_id }}"
-        register: block_volume_device
+      - debug:
+          verbosity: 1
+          msg: "Detected block storage at {{ block_storage_device }}"
+
+      - name: Partition attached block storage
+        parted:
+          device: "{{ block_storage_device }}"
+          number: 1
+          state: present
+      - name: Format attached block storage
+        filesystem:
+          fstype: "{{ block_storage_format }}"
+          dev: "{{ block_storage_device }}"
       - name: Mount attached block storage
         mount:
           path: "{{ block_storage_mount_root }}"
-          src: "/dev/disk/by-uuid/{{ block_id }}"
-          fstype: xfs
+          src: "{{ block_storage_device }}"
+          fstype: "{{ block_storage_format }}"
           opts: discard,defaults,noatime
           state: mounted
-        when: block_volume_device.stat.exists
+
       - name: Create mysql bind data directory
         file:
           path: "{{ block_storage_mount_root }}/mysql"
           state: directory
       - name: Bind mount mysql data directory
         mount:
-          path: /var/lib/mysql
+          path: "{{ mysqld_datadir }}"
           src: "{{ block_storage_mount_root }}/mysql"
           opts: bind
           state: mounted
@@ -49,16 +62,16 @@
           path: "{{ block_storage_mount_root }}/.shared"
           state: directory
 
-      when: block_id is defined and block_id | length > 0
+      - name: Check for block storage shared root my.cnf
+        stat:
+          path: "{{ block_storage_mount_root }}/.shared/root-my.cnf"
+        register: shared_root_my_cnf_file
 
-    - name: Check for block storage shared root my.cnf
-      stat:
-        path: "{{ block_storage_mount_root }}/.shared/root-my.cnf"
-      register: shared_root_my_cnf_file
+      - name: Copy shared root my.cnf into local machine (if applicable)
+        copy:
+          remote_src: yes
+          src: "{{ block_storage_mount_root }}/.shared/root-my.cnf"
+          dest: "{{ root_my_cnf_path }}"
+        when: shared_root_my_cnf_file.stat.exists 
 
-    - name: Copy shared root my.cnf into local machine (if applicable)
-      copy:
-        remote_src: yes
-        src: "{{ block_storage_mount_root }}/.shared/root-my.cnf"
-        dest: "{{ root_my_cnf_path }}"
-      when: shared_root_my_cnf_file.stat.exists 
+      when: block_storage_device_stat.stat.exists

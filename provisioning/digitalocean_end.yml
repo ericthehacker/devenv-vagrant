@@ -8,8 +8,10 @@
     - ./devenv_vars.config.yml
 
   vars:
-    block_storage_mount_root: /var/www
+    # TODO: figure out dynamic mount points
+    block_storage_mount_root: /data
     root_my_cnf_path: ~root/.my.cnf
+    block_storage_device: /dev/sda
 
   tasks:
 
@@ -17,11 +19,7 @@
       set_fact:
         block_storage_mounted: yes
       loop: "{{ ansible_mounts }}"
-      when: block_id is defined and block_id | length > 0 and item.uuid == block_id
-
-    - debug:
-        verbosity: 1
-        msg: "The following storage block volume ID was provided: {{ block_id }}"
+      when: item.device == block_storage_device
 
     - name: Sync root my.cnf to block storage (if applicable)
       block:
@@ -38,4 +36,4 @@
           dest: "{{ block_storage_mount_root }}/.shared/root-my.cnf"
         when: root_my_cnf_file.stat.exists
 
-      when: block_id is defined and block_id | length > 0 and block_storage_mounted is defined and block_storage_mounted
+      when: block_storage_mounted is defined and block_storage_mounted
